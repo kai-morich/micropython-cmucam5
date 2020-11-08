@@ -1,6 +1,9 @@
 
+import ujson as json
+
 class PixyBlock( object ):
-    pass
+    def toJSON( self ):
+        return json.dumps( self.__dict__ )
 
 class CMUcam5( object ):
 
