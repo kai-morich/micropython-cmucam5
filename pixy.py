@@ -1,4 +1,6 @@
+# for encoding/decoding see https://docs.pixycam.com/wiki/doku.php?id=wiki:v2:protocol_reference
 
+import time
 import ujson as json
 
 class PixyBlock( object ):
@@ -13,12 +15,14 @@ class CMUcam5( object ):
 
     TYPE_GET_BLOCKS = 32
     TYPE_SET_LED = 20
-    
+    TYPE_SET_LAMP = 22
+    TYPE_GET_VERSION = 14
+    TYPE_GET_RGB = 112
+
     SZ_HEADER = 6
     SZ_BLOCK = 14
 
     def __init__( self, i2c, addr=0x54 ):
-
         self.i2c = i2c
         self.addr = addr
 
@@ -27,10 +31,8 @@ class CMUcam5( object ):
         return bytearray( self.SYNC_NOCK + [pkt_type, l] + pl_bytes )
 
     def _decode_pkt( self, hdr ):
-
         if hdr[0] != self.SYNC_CK[0] or hdr[1] != self.SYNC_CK[1]:
             raise Exception( 'Invalid sync' )
-
         # Parse header info.
         pkt_type = int( hdr[2] )
         l = int( hdr[3] )
@@ -46,32 +48,46 @@ class CMUcam5( object ):
         if cktmp != cksum:
             raise Exception( 'cksum failure.' )
 
-    def set_led( self, r, g, b ):
-        pkt = self._encode_pkt( self.TYPE_SET_LED, [r, g, b] )
+    def _call( self, type, args ):
+        pkt = self._encode_pkt( type, args )
         self.i2c.writeto( self.addr, pkt )
+
+        hdr = self.i2c.readfrom( self.addr, self.SZ_HEADER )
+        packet_type, l, cksum = self._decode_pkt( hdr )
+        payload = self.i2c.readfrom( self.addr, l )
+
+        self._verify_cksum( cksum, payload )
+        return packet_type, payload
+
+    def init( self, wait_ms ):
+        for i in range(wait_ms/100):
+            try:
+                self.get_version() # device connection test
+                return
+            except:
+                time.sleep_ms(100)
+        raise
+
+    def get_version( self ):
+        _, pl = self._call( self.TYPE_GET_VERSION, [] )
+        return pl # todo: split payload
+
+    def set_lamp( self, upper, lower):
+        self._call( self.TYPE_SET_LAMP, [upper, lower] )
+
+    def set_led( self, r, g, b ):
+        """no effect if set_lamp() used before"""
+        self._call( self.TYPE_SET_LED, [r, g, b] )
 
     def get_blocks( self, sig=255, max_blks=255 ):
-        # Send request for blocks.
-        pkt = self._encode_pkt( self.TYPE_GET_BLOCKS, [sig, max_blks] )
-        self.i2c.writeto( self.addr, pkt )
-        
-        # Fetch and parse the header info.
-        hdr = self.i2c.readfrom( self.addr, self.SZ_HEADER )
-        pkt_type, l, cksum = self._decode_pkt( hdr )
-
-        # Fetch the actual payload.
-        pl = self.i2c.readfrom( self.addr, l )
-        self._verify_cksum( cksum, pl )
+        _, pl = self._call( self.TYPE_GET_BLOCKS, [sig, max_blks] )
 
         count = len( pl ) / self.SZ_BLOCK
-
-        # Parse payload into block objects.
         blks_out = []
         for i in range( count ):
             if 0xfe == pl[0]:
                 # No blocks.
                 break
-
             offset = i * self.SZ_BLOCK
             pb = PixyBlock()
             pb.sig = (pl[offset + 1] << 8) + pl[offset]
@@ -82,9 +98,9 @@ class CMUcam5( object ):
             pb.a = (pl[offset + 11] << 8) + pl[offset + 10]
             pb.idx = pl[offset + 12]
             pb.age = pl[offset + 13]
-
-            # Add block to outgoing list.
             blks_out += [pb]
-
         return blks_out
 
+    def get_rgb( self, x, y, saturate):
+        pt, pl = self._call( self.TYPE_GET_RGB, [x << 8, x & 0xff, y << 8, y & 0xff, saturate] )
+        return pl[2], pl[1], pl[0]
