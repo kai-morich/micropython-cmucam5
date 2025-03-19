@@ -13,11 +13,13 @@ class CMUcam5( object ):
     SYNC_NOCK = [0xae, 0xc1]
     SYNC_CK = [0xaf, 0xc1]
 
-    TYPE_GET_BLOCKS = 32
+    TYPE_SET_BRIGHTNESS = 16
     TYPE_SET_LED = 20
     TYPE_SET_LAMP = 22
+    
     TYPE_GET_RESOLUTION = 12
     TYPE_GET_VERSION = 14
+    TYPE_GET_BLOCKS = 32
     TYPE_GET_RGB = 112
 
     SZ_HEADER = 6
@@ -75,7 +77,10 @@ class CMUcam5( object ):
     
     def get_resolution( self ):
         _, pl = self._call( self.TYPE_GET_RESOLUTION, [0] )
-        return pl[0] + pl[1]*256, pl[2] + pl[3]*256
+        return pl[0] + (pl[1]<<8), pl[2] + (pl[3]<<8)
+
+    def set_brightness( self, value ):
+        self._call( self.TYPE_SET_BRIGHTNESS, [value] )
 
     def set_lamp( self, upper, lower):
         self._call( self.TYPE_SET_LAMP, [upper, lower] )
